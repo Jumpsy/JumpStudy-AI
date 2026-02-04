@@ -118,7 +118,91 @@ Everything is free and unlimited - generate as many images as you want!`
   return responses[Math.floor(Math.random() * responses.length)]
 }
 
+// Fast provider request with timeout
+async function tryProvider(
+  provider: typeof AI_PROVIDERS[0],
+  messages: any[],
+  timeoutMs: number = 8000
+): Promise<{ content: string; provider: string; model: string } | null> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await fetch(provider.url, {
+      method: 'POST',
+      headers: provider.headers(),
+      body: JSON.stringify(provider.transformRequest(messages)),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeout)
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    const contentType = response.headers.get('content-type') || ''
+    let responseText: string
+
+    if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
+      responseText = await response.text()
+    } else {
+      const data = await response.json()
+      responseText = JSON.stringify(data)
+    }
+
+    let content: string | null = null
+    try {
+      const parsed = JSON.parse(responseText)
+      content = provider.transformResponse(parsed)
+    } catch {
+      content = provider.transformResponse(responseText)
+    }
+
+    if (content && content.trim().length > 0) {
+      markProviderSuccess(provider.name)
+      return { content, provider: provider.name, model: provider.model }
+    }
+
+    throw new Error('Empty response')
+  } catch (error) {
+    clearTimeout(timeout)
+    markProviderFailed(provider.name)
+    return null
+  }
+}
+
+// Race multiple providers for fastest response
+async function raceProviders(
+  messages: any[],
+  numProviders: number = 3
+): Promise<{ content: string; provider: string; model: string } | null> {
+  const providers: typeof AI_PROVIDERS[0][] = []
+
+  // Get multiple providers to race
+  for (let i = 0; i < numProviders; i++) {
+    providers.push(getNextChatProvider())
+  }
+
+  console.log(`Racing ${providers.length} providers: ${providers.map(p => p.name).join(', ')}`)
+
+  // Race all providers - first valid response wins
+  const results = await Promise.allSettled(
+    providers.map(p => tryProvider(p, messages, 10000))
+  )
+
+  for (const result of results) {
+    if (result.status === 'fulfilled' && result.value) {
+      return result.value
+    }
+  }
+
+  return null
+}
+
 export async function POST(request: NextRequest) {
+  const startTime = Date.now()
+
   try {
     const body = await request.json()
     const { messages } = body
@@ -134,15 +218,21 @@ export async function POST(request: NextRequest) {
     let searchResults: any[] | undefined
     let augmentedMessages = messages
 
-    // Check if this question needs web research
-    if (needsWebResearch(lastUserMessage)) {
+    // Only do web search for longer, complex queries (skip for speed on simple messages)
+    const shouldSearch = needsWebResearch(lastUserMessage) && lastUserMessage.length > 20
+
+    if (shouldSearch) {
       try {
-        console.log('Performing web search for:', lastUserMessage.slice(0, 50))
-        searchResults = await webSearch(lastUserMessage)
+        // Run search with tight timeout
+        const searchPromise = webSearch(lastUserMessage)
+        const timeoutPromise = new Promise<any[]>((_, reject) =>
+          setTimeout(() => reject(new Error('Search timeout')), 3000)
+        )
+
+        searchResults = await Promise.race([searchPromise, timeoutPromise])
 
         if (searchResults && searchResults.length > 0) {
           const searchContext = formatSearchResults(searchResults)
-          // Augment the last message with search context
           augmentedMessages = [
             ...messages.slice(0, -1),
             {
@@ -152,15 +242,11 @@ export async function POST(request: NextRequest) {
           ]
         }
       } catch (error) {
-        console.log('Web search failed, continuing without search results')
+        // Search failed or timed out - continue without it for speed
       }
     }
 
-    // Check if this is a coding question (for future Claude routing)
     const isCoding = isCodingQuestion(lastUserMessage)
-    if (isCoding) {
-      console.log('Detected coding question, using optimized routing')
-    }
 
     // Prepare messages with system prompt
     const fullMessages = [
@@ -168,74 +254,40 @@ export async function POST(request: NextRequest) {
       ...augmentedMessages,
     ]
 
-    // Try each provider until one works
-    const maxAttempts = AI_PROVIDERS.length + 1
-    let lastError: string | null = null
+    // Race multiple providers for fastest response
+    const result = await raceProviders(fullMessages, 3)
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (result) {
+      const responseTime = Date.now() - startTime
+      console.log(`Response from ${result.provider} in ${responseTime}ms`)
+
+      return NextResponse.json({
+        message: result.content,
+        model: result.model,
+        provider: result.provider,
+        hasSearchResults: !!searchResults?.length,
+        isCodingResponse: isCoding,
+        responseTime,
+      })
+    }
+
+    // All providers failed - try one more time sequentially with longer timeout
+    for (let i = 0; i < AI_PROVIDERS.length; i++) {
       const provider = getNextChatProvider()
+      const result = await tryProvider(provider, fullMessages, 15000)
 
-      try {
-        console.log(`Trying provider: ${provider.name}`)
-
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 30000) // 30s timeout
-
-        const response = await fetch(provider.url, {
-          method: 'POST',
-          headers: provider.headers(),
-          body: JSON.stringify(provider.transformRequest(fullMessages)),
-          signal: controller.signal,
+      if (result) {
+        return NextResponse.json({
+          message: result.content,
+          model: result.model,
+          provider: result.provider,
+          hasSearchResults: !!searchResults?.length,
+          isCodingResponse: isCoding,
         })
-
-        clearTimeout(timeout)
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
-        }
-
-        // Handle streaming responses
-        const contentType = response.headers.get('content-type') || ''
-        let responseText: string
-
-        if (contentType.includes('text/event-stream') || contentType.includes('text/plain')) {
-          responseText = await response.text()
-        } else {
-          const data = await response.json()
-          responseText = JSON.stringify(data)
-        }
-
-        // Transform the response
-        let content: string | null = null
-        try {
-          const parsed = JSON.parse(responseText)
-          content = provider.transformResponse(parsed)
-        } catch {
-          content = provider.transformResponse(responseText)
-        }
-
-        if (content && content.trim().length > 0) {
-          markProviderSuccess(provider.name)
-          return NextResponse.json({
-            message: content,
-            model: provider.model,
-            provider: provider.name,
-            hasSearchResults: !!searchResults?.length,
-            isCodingResponse: isCoding,
-          })
-        }
-
-        throw new Error('Empty response')
-
-      } catch (error: any) {
-        console.log(`Provider ${provider.name} failed:`, error.message)
-        markProviderFailed(provider.name)
-        lastError = error.message
-        continue
       }
     }
 
-    // All providers failed, use fallback
+    // Ultimate fallback
     console.log('All providers failed, using fallback')
     const fallbackResponse = generateFallbackResponse(lastUserMessage)
 
