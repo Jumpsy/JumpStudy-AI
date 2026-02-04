@@ -1,6 +1,6 @@
 {
   "name": "jump-code-cli",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Jump Code - AI coding assistant for your terminal. Full Claude Code clone with computer control, self-modification, and unlimited usage.",
   "type": "module",
   "main": "dist/index.js",
@@ -40,9 +40,7 @@
     "dist",
     "README.md"
   ],
-  "dependencies": {
-    "@supabase/supabase-js": "^2.49.1"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^22.10.2",
     "typescript": "^5.7.2",
