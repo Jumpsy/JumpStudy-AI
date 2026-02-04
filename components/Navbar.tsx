@@ -2,17 +2,18 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { MessageSquare, Shield, Sparkles, Home, Menu, X, Image, Video, Mic } from 'lucide-react'
+import { MessageSquare, Shield, Sparkles, Home, Menu, X, Image, Video, Mic, BookOpen, FileText, PenTool } from 'lucide-react'
 import { useState } from 'react'
 
 const navLinks = [
   { href: '/', label: 'Home', icon: Home },
   { href: '/chat', label: 'Chat', icon: MessageSquare },
-  { href: '/conversation', label: 'Voice', icon: Mic },
   { href: '/humanizer', label: 'Humanizer', icon: Sparkles },
   { href: '/detector', label: 'Detector', icon: Shield },
+  { href: '/study', label: 'Study', icon: BookOpen },
+  { href: '/notebook', label: 'Notebook', icon: FileText },
+  { href: '/writer', label: 'Writer', icon: PenTool },
   { href: '/image-generator', label: 'Images', icon: Image },
-  { href: '/video-generator', label: 'Videos', icon: Video },
 ]
 
 export default function Navbar() {
