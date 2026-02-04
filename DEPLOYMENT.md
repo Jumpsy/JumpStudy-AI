@@ -7,19 +7,20 @@ A **fully-featured ChatGPT clone** with:
 - ✅ DALL-E 3 image generation
 - ✅ File upload (PDFs, documents)
 - ✅ Conversation history & memory
-- ✅ 4 subscription tiers (Free, Starter, Premium, Unlimited)
+- ✅ 5 subscription tiers (Free, Student, Pro, Team, Jump Code)
 - ✅ Smart AI model routing (85-97% profit margins!)
 - ✅ Usage tracking & limits
 - ✅ Beautiful ChatGPT-like interface
 
 ## 💰 Profit Margins (After Smart Routing)
 
-| Tier | Price | Avg Cost | Profit | Margin |
-|------|-------|----------|--------|--------|
-| Free | $0 | $0.03 | -$0.03 | Loss leader |
-| Starter | $9.99 | $0.30 | $9.69 | **97%** |
-| Premium | $19.99 | $1.50 | $18.49 | **92%** |
-| Unlimited | $39.99 | $6.00 | $33.99 | **85%** |
+| Tier | Monthly (CAD) | Yearly (CAD) | Avg Cost | Margin |
+|------|--------------|--------------|----------|--------|
+| Free | $0 | - | $0.03 | Loss leader |
+| Student | $9.99 | $79.99 | $0.90 | **91%** |
+| Pro | $15.99 | $127.99 | $3.00 | **81%** |
+| Team | $13.99/user | $99.99/user | $1.50 | **89%** |
+| Jump Code | $24.99 | $199.99 | $6.00 | **76%** |
 
 ## 🔧 Setup Instructions
 
@@ -42,15 +43,23 @@ OPENAI_API_KEY=sk-proj-...
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
-# Stripe (optional - for payments)
+# Stripe (for payments)
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_...
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 
-# Stripe Price IDs (create in Stripe Dashboard)
-STRIPE_PRICE_STARTER=price_starter
-STRIPE_PRICE_PREMIUM=price_premium
-STRIPE_PRICE_UNLIMITED=price_unlimited
+# Stripe Price IDs are now configured in lib/plan-tiers.ts
+# Monthly Prices (CAD):
+#   - Student: price_1SxBIn ($9.99/month)
+#   - Pro: price_1SxBIh ($15.99/month)
+#   - Team: price_1SxBOr ($13.99/month per user)
+#   - Jump Code: price_1SxBPl ($24.99/month)
+#
+# Yearly Prices (CAD):
+#   - Student: price_1SxBRx ($79.99/year)
+#   - Pro: price_1SxBQr ($127.99/year)
+#   - Team: price_1SxBSl ($99.99/year per user)
+#   - Jump Code: price_1SxBRr ($199.99/year)
 ```
 
 ### 3. Update Your Chat Page
@@ -186,10 +195,11 @@ vercel --prod
 
 ## 💡 Tips for Success
 
-- **Free Tier** = Lead generation (users get hooked with 10 messages)
-- **Upsell to Starter** at message 8/10 with upgrade prompt
-- **Promote Premium** as "Most Popular" (highest profit margin)
-- **Test pricing** - You can adjust usage limits easily in `types/database.ts`
+- **Free Tier** = Lead generation (users get hooked with limited credits)
+- **Upsell to Student** when credits run low with upgrade prompt
+- **Promote Student** as "Most Popular" (best value for students)
+- **Jump Code** for developers who need Claude Opus AI
+- **Test pricing** - You can adjust credits and limits in `lib/plan-tiers.ts`
 
 ## 🚨 Important Notes
 
@@ -198,13 +208,14 @@ vercel --prod
 - Monitor usage in Supabase to prevent abuse
 - Set up Stripe webhooks for subscription management
 
-## 📊 Expected Metrics
+## 📊 Expected Metrics (CAD)
 
 With 100 paid users:
-- 20 Starter ($199.80/month revenue, ~$195 profit)
-- 50 Premium ($999.50/month revenue, ~$924 profit)
-- 30 Unlimited ($1,199.70/month revenue, ~$1,020 profit)
+- 40 Student ($399.60/month revenue, ~$364 profit)
+- 30 Pro ($479.70/month revenue, ~$389 profit)
+- 20 Team ($279.80/month revenue, ~$249 profit)
+- 10 Jump Code ($249.90/month revenue, ~$190 profit)
 
-**Total: $2,399/month revenue, ~$2,139/month profit**
+**Total: $1,409/month revenue, ~$1,192/month profit**
 
-With 1,000 paid users: **$21,390/month profit!**
+With 1,000 paid users: **~$11,920 CAD/month profit!**
