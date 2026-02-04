@@ -1,7 +1,7 @@
 {
-  "name": "@anthropic-ai/jump-code",
-  "version": "1.0.0",
-  "description": "Jump Code - AI coding assistant for your terminal powered by Claude Opus",
+  "name": "jump-code-cli",
+  "version": "2.0.0",
+  "description": "Jump Code - AI coding assistant for your terminal. Full Claude Code clone with computer control, self-modification, and unlimited usage.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -11,10 +11,36 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "npx tsx src/index.ts"
+    "dev": "npx tsx src/index.ts",
+    "prepublishOnly": "npm run build"
   },
+  "keywords": [
+    "ai",
+    "claude",
+    "coding",
+    "assistant",
+    "terminal",
+    "cli",
+    "automation",
+    "computer-control",
+    "jumpstudy"
+  ],
+  "author": "JumpStudy",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jumpsy/JumpStudy-AI.git",
+    "directory": "packages/jump-code-cli"
+  },
+  "homepage": "https://jumpstudy.ai",
+  "bugs": {
+    "url": "https://github.com/Jumpsy/JumpStudy-AI/issues"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
     "@supabase/supabase-js": "^2.49.1"
   },
   "devDependencies": {
