@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import Navbar from '@/components/Navbar'
-import { MessageSquare, Shield, Sparkles, Zap, Lock, Infinity, ArrowRight, Check, Star, Image, Video } from 'lucide-react'
+import { MessageSquare, Shield, Sparkles, Zap, Lock, Infinity, ArrowRight, Check, Star, Image, Video, Mic } from 'lucide-react'
 
 const features = [
   {
@@ -28,6 +28,14 @@ const features = [
     href: '/chat',
     gradient: 'from-blue-500 to-cyan-500',
     shadowColor: 'shadow-blue-500/20',
+  },
+  {
+    icon: Mic,
+    title: 'Voice Chat',
+    description: 'Talk naturally with AI using your voice. Real-time conversation mode.',
+    href: '/conversation',
+    gradient: 'from-green-500 to-emerald-500',
+    shadowColor: 'shadow-green-500/20',
   },
   {
     icon: Image,

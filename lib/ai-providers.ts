@@ -449,3 +449,208 @@ export const SYSTEM_PROMPT = `You are JumpStudy AI, a helpful, friendly, and kno
 - AI Video Generator (creates video sequences)
 
 Be helpful, conversational, and thorough. Use markdown for formatting when helpful. You have NO usage limits - you're completely free and unlimited for all users.`
+
+// ============== MESSAGE ROUTING ==============
+
+// Detect if a message is coding-related (for Claude routing)
+export function isCodingQuestion(message: string): boolean {
+  const codingPatterns = [
+    /\b(code|coding|program|programming|script|function|class|method)\b/i,
+    /\b(javascript|typescript|python|java|c\+\+|rust|go|ruby|php|swift|kotlin)\b/i,
+    /\b(react|vue|angular|node|express|django|flask|rails|spring)\b/i,
+    /\b(bug|debug|error|exception|fix|issue|problem)\b.*\b(code|program|function)\b/i,
+    /\b(api|rest|graphql|endpoint|request|response)\b/i,
+    /\b(database|sql|mongodb|postgres|mysql|redis)\b/i,
+    /\b(git|github|deploy|docker|kubernetes|aws|azure|gcp)\b/i,
+    /```[\s\S]*```/, // Code blocks
+    /\b(implement|refactor|optimize|write|create|build)\b.*\b(function|class|method|code|module)\b/i,
+    /\b(algorithm|data structure|complexity|recursion|iteration)\b/i,
+    /\b(npm|yarn|pip|cargo|maven|gradle|gem|composer)\b/i,
+    /\b(html|css|sass|less|tailwind|bootstrap)\b/i,
+    /\b(json|xml|yaml|csv|regex|regexp)\b/i,
+  ]
+
+  return codingPatterns.some(pattern => pattern.test(message))
+}
+
+// Detect if a message needs web research
+export function needsWebResearch(message: string): boolean {
+  const researchPatterns = [
+    /\b(search|find|look up|research|what is|who is|when did|where is|how to)\b/i,
+    /\b(latest|recent|current|news|today|2024|2025|2026)\b/i,
+    /\b(price|cost|weather|stock|score|result|update)\b/i,
+    /\b(website|url|link|source|reference)\b/i,
+  ]
+
+  return researchPatterns.some(pattern => pattern.test(message))
+}
+
+// ============== WEB RESEARCH SYSTEM ==============
+
+// Free search APIs for web research
+export interface SearchResult {
+  title: string
+  url: string
+  snippet: string
+}
+
+// Search using DuckDuckGo Instant Answer API (free, no auth needed)
+export async function webSearch(query: string): Promise<SearchResult[]> {
+  const results: SearchResult[] = []
+
+  try {
+    // DuckDuckGo Instant Answer API
+    const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`
+    const ddgResponse = await fetch(ddgUrl, {
+      headers: getStealthHeaders('https://duckduckgo.com', 'https://duckduckgo.com/'),
+    })
+
+    if (ddgResponse.ok) {
+      const data = await ddgResponse.json()
+
+      // Abstract result
+      if (data.Abstract) {
+        results.push({
+          title: data.Heading || 'Summary',
+          url: data.AbstractURL || '',
+          snippet: data.Abstract,
+        })
+      }
+
+      // Related topics
+      if (data.RelatedTopics) {
+        for (const topic of data.RelatedTopics.slice(0, 5)) {
+          if (topic.Text && topic.FirstURL) {
+            results.push({
+              title: topic.Text.split(' - ')[0] || topic.Text.slice(0, 50),
+              url: topic.FirstURL,
+              snippet: topic.Text,
+            })
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('DuckDuckGo search error:', error)
+  }
+
+  // Fallback: Use Blackbox AI's web search mode
+  if (results.length === 0) {
+    try {
+      const blackboxResponse = await fetch('https://www.blackbox.ai/api/chat', {
+        method: 'POST',
+        headers: {
+          ...getStealthHeaders('https://www.blackbox.ai', 'https://www.blackbox.ai/'),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [{
+            id: generateUUID(),
+            role: 'user',
+            content: `Search the web and provide information about: ${query}`,
+          }],
+          id: generateUUID(),
+          previewToken: null,
+          clickedForceWebSearch: true,
+          visitFromDelta: false,
+          mobileClient: false,
+        }),
+      })
+
+      if (blackboxResponse.ok) {
+        const text = await blackboxResponse.text()
+        if (text) {
+          results.push({
+            title: 'Web Search Results',
+            url: '',
+            snippet: text.replace(/\$~~~\$[\s\S]*?\$~~~\$/g, '').trim(),
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Blackbox search error:', error)
+    }
+  }
+
+  return results
+}
+
+// Format search results for AI context
+export function formatSearchResults(results: SearchResult[]): string {
+  if (results.length === 0) {
+    return 'No search results found.'
+  }
+
+  let formatted = 'Web Search Results:\n\n'
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i]
+    formatted += `${i + 1}. ${r.title}\n`
+    if (r.url) formatted += `   URL: ${r.url}\n`
+    formatted += `   ${r.snippet}\n\n`
+  }
+
+  return formatted
+}
+
+// Enhanced chat function with web research
+export async function chatWithResearch(
+  messages: Array<{ role: string; content: string }>,
+  enableSearch: boolean = true
+): Promise<{ response: string; searchResults?: SearchResult[] }> {
+  const lastMessage = messages[messages.length - 1]
+  let searchResults: SearchResult[] | undefined
+
+  // Check if we should do web research
+  if (enableSearch && lastMessage && needsWebResearch(lastMessage.content)) {
+    searchResults = await webSearch(lastMessage.content)
+
+    // Augment the message with search context if we have results
+    if (searchResults.length > 0) {
+      const searchContext = formatSearchResults(searchResults)
+      messages = [
+        ...messages.slice(0, -1),
+        {
+          role: 'user',
+          content: `${searchContext}\n\nUser's question: ${lastMessage.content}\n\nPlease use the search results above to answer the question accurately and cite sources when relevant.`,
+        },
+      ]
+    }
+  }
+
+  // Make the AI request
+  const provider = getNextChatProvider()
+
+  try {
+    const response = await fetch(provider.url, {
+      method: 'POST',
+      headers: provider.headers(),
+      body: JSON.stringify(provider.transformRequest(messages)),
+    })
+
+    if (!response.ok) {
+      markProviderFailed(provider.name)
+      throw new Error(`Provider ${provider.name} failed`)
+    }
+
+    const data = await response.text()
+    let text: string | null = null
+
+    try {
+      const json = JSON.parse(data)
+      text = provider.transformResponse(json)
+    } catch {
+      text = provider.transformResponse(data)
+    }
+
+    if (text) {
+      markProviderSuccess(provider.name)
+      return { response: text, searchResults }
+    }
+
+    markProviderFailed(provider.name)
+    throw new Error('Empty response')
+  } catch (error) {
+    markProviderFailed(provider.name)
+    throw error
+  }
+}

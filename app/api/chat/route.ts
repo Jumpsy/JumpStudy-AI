@@ -5,6 +5,10 @@ import {
   markProviderFailed,
   markProviderSuccess,
   SYSTEM_PROMPT,
+  isCodingQuestion,
+  needsWebResearch,
+  webSearch,
+  formatSearchResults,
 } from '@/lib/ai-providers'
 
 // Built-in response generator as ultimate fallback
@@ -127,11 +131,41 @@ export async function POST(request: NextRequest) {
     }
 
     const lastUserMessage = messages[messages.length - 1]?.content || ''
+    let searchResults: any[] | undefined
+    let augmentedMessages = messages
+
+    // Check if this question needs web research
+    if (needsWebResearch(lastUserMessage)) {
+      try {
+        console.log('Performing web search for:', lastUserMessage.slice(0, 50))
+        searchResults = await webSearch(lastUserMessage)
+
+        if (searchResults && searchResults.length > 0) {
+          const searchContext = formatSearchResults(searchResults)
+          // Augment the last message with search context
+          augmentedMessages = [
+            ...messages.slice(0, -1),
+            {
+              role: 'user',
+              content: `${searchContext}\n\nUser's question: ${lastUserMessage}\n\nPlease use the search results above to answer the question accurately and cite sources when relevant.`,
+            },
+          ]
+        }
+      } catch (error) {
+        console.log('Web search failed, continuing without search results')
+      }
+    }
+
+    // Check if this is a coding question (for future Claude routing)
+    const isCoding = isCodingQuestion(lastUserMessage)
+    if (isCoding) {
+      console.log('Detected coding question, using optimized routing')
+    }
 
     // Prepare messages with system prompt
     const fullMessages = [
       { role: 'system', content: SYSTEM_PROMPT },
-      ...messages,
+      ...augmentedMessages,
     ]
 
     // Try each provider until one works
@@ -186,6 +220,8 @@ export async function POST(request: NextRequest) {
             message: content,
             model: provider.model,
             provider: provider.name,
+            hasSearchResults: !!searchResults?.length,
+            isCodingResponse: isCoding,
           })
         }
 
