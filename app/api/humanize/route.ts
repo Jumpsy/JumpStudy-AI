@@ -217,7 +217,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Perform humanization
+    // Count words
+    const wordCount = text.trim().split(/\s+/).length
+
+    // Skip humanization for text under 30 words - return as-is for speed
+    if (wordCount < 30) {
+      return NextResponse.json({
+        original: text,
+        humanized: text,
+        humanScore: 85, // Short text is naturally human-like
+        changes: {
+          contractionsAdded: 0,
+          formalWordsRemoved: 0,
+          naturalPhrasesAdded: 0,
+        },
+        wordCount,
+        mode,
+        skipped: true,
+        reason: 'Text under 30 words - no humanization needed',
+      })
+    }
+
+    // Perform humanization for longer text
     const humanizedText = advancedHumanize(text, mode as 'light' | 'medium' | 'aggressive')
 
     // Calculate improvement score
