@@ -1,168 +1,190 @@
-import { Check } from 'lucide-react';
-import Link from 'next/link';
+'use client'
+
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import Navbar from '@/components/Navbar'
+import { Check, Sparkles, Zap, Users, Crown, Loader2 } from 'lucide-react'
+import { PRICING_PLANS } from '@/lib/pricing'
+import { createClient } from '@/lib/supabase/client'
 
 export default function PricingPage() {
-  const plans = [
-    {
-      name: 'Free',
-      price: 0,
-      period: 'forever',
-      description: 'Perfect for trying out JumpStudyAI',
-      features: [
-        '10 messages per month',
-        'GPT-4o-mini access',
-        'Basic chat features',
-        '7-day conversation history',
-      ],
-      limitations: ['No image generation', 'No file uploads', 'Limited history'],
-      cta: 'Start Free',
-      href: '/signup',
-      highlighted: false,
-    },
-    {
-      name: 'Starter',
-      price: 9.99,
-      period: 'month',
-      description: 'Great for students and learners',
-      features: [
-        '100 messages per month',
-        'Full GPT-4o access',
-        '10 AI images per month',
-        'Upload PDFs & documents',
-        '30-day conversation history',
-        'Priority support',
-      ],
-      cta: 'Get Started',
-      href: '/signup?plan=starter',
-      highlighted: false,
-    },
-    {
-      name: 'Premium',
-      price: 19.99,
-      period: 'month',
-      badge: 'Most Popular',
-      description: 'Best for power users',
-      features: [
-        '500 messages per month',
-        'Full GPT-4o access',
-        '50 AI images per month',
-        'Unlimited file uploads',
-        'Permanent conversation history',
-        'Priority support',
-        'Advanced features',
-      ],
-      cta: 'Go Premium',
-      href: '/signup?plan=premium',
-      highlighted: true,
-    },
-    {
-      name: 'Unlimited',
-      price: 39.99,
-      period: 'month',
-      description: 'For professionals & teams',
-      features: [
-        'Unlimited messages',
-        'Full GPT-4o access',
-        '200 AI images per month',
-        'Unlimited file uploads',
-        'Permanent history',
-        'API access',
-        'Priority support',
-        'Early feature access',
-        'Custom integrations',
-      ],
-      cta: 'Get Unlimited',
-      href: '/signup?plan=unlimited',
-      highlighted: false,
-    },
-  ];
+  const router = useRouter()
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null)
+
+  const handleSubscribe = async (planId: string) => {
+    if (planId === 'free') {
+      router.push('/signup')
+      return
+    }
+
+    setLoadingPlan(planId)
+
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+
+      if (!user) {
+        router.push('/login?redirect=/pricing')
+        return
+      }
+
+      // Create checkout session
+      const response = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId }),
+      })
+
+      const data = await response.json()
+
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
+      if (data.url) {
+        window.location.href = data.url
+      }
+    } catch (error) {
+      console.error('Subscription error:', error)
+      alert('Failed to start subscription. Please try again.')
+    } finally {
+      setLoadingPlan(null)
+    }
+  }
+
+  const planIcons = {
+    free: Sparkles,
+    plus: Zap,
+    team: Users,
+    pro: Crown,
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-20 px-4">
-      <div className="max-w-7xl mx-auto">
-        <div className="text-center mb-16">
-          <h1 className="text-5xl font-bold text-gray-900 mb-4">
-            Choose Your Plan
-          </h1>
-          <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-            Get unlimited access to AI-powered learning. No hidden fees, cancel anytime.
-          </p>
-        </div>
+    <div className="min-h-screen bg-gray-950">
+      <Navbar />
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-          {plans.map((plan) => (
-            <div
-              key={plan.name}
-              className={`bg-white rounded-2xl shadow-xl overflow-hidden transition-transform hover:scale-105 ${
-                plan.highlighted ? 'ring-4 ring-blue-600 relative' : ''
-              }`}
-            >
-              {plan.badge && (
-                <div className="bg-blue-600 text-white text-center py-2 px-4 text-sm font-semibold">
-                  {plan.badge}
-                </div>
-              )}
+      <main className="pt-24 pb-12 px-4">
+        <div className="max-w-6xl mx-auto">
+          {/* Header */}
+          <div className="text-center mb-12">
+            <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
+              Simple, Transparent Pricing
+            </h1>
+            <p className="text-xl text-gray-400 max-w-2xl mx-auto">
+              20% cheaper than ChatGPT. All plans include unlimited AI chat, humanizer, and detector.
+            </p>
+          </div>
 
-              <div className="p-8">
-                <h3 className="text-2xl font-bold text-gray-900 mb-2">{plan.name}</h3>
-                <p className="text-gray-600 text-sm mb-6">{plan.description}</p>
+          {/* Comparison Banner */}
+          <div className="mb-12 p-4 bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/20 rounded-xl text-center">
+            <p className="text-green-400">
+              <span className="font-semibold">Save 20%</span> compared to ChatGPT Plus ($20/mo) -
+              Our Plus plan is just <span className="font-bold">$16/mo</span>!
+            </p>
+          </div>
 
-                <div className="mb-6">
-                  <span className="text-5xl font-bold text-gray-900">
-                    ${plan.price}
-                  </span>
-                  <span className="text-gray-600">/{plan.period}</span>
-                </div>
+          {/* Pricing Cards */}
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {Object.values(PRICING_PLANS).map((plan) => {
+              const Icon = planIcons[plan.id as keyof typeof planIcons]
+              const isPopular = 'popular' in plan && plan.popular
 
-                <Link
-                  href={plan.href}
-                  className={`block w-full text-center py-3 px-6 rounded-lg font-semibold transition-colors mb-6 ${
-                    plan.highlighted
-                      ? 'bg-blue-600 text-white hover:bg-blue-700'
-                      : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
+              return (
+                <div
+                  key={plan.id}
+                  className={`relative p-6 rounded-2xl border ${
+                    isPopular
+                      ? 'bg-gradient-to-b from-purple-900/50 to-gray-900 border-purple-500/50'
+                      : 'bg-gray-900 border-gray-800'
                   }`}
                 >
-                  {plan.cta}
-                </Link>
-
-                <div className="space-y-3">
-                  {plan.features.map((feature) => (
-                    <div key={feature} className="flex items-start gap-3">
-                      <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                      <span className="text-gray-700 text-sm">{feature}</span>
+                  {isPopular && (
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-purple-600 rounded-full text-xs font-medium text-white">
+                      Most Popular
                     </div>
-                  ))}
-                </div>
+                  )}
 
-                {plan.limitations && (
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <p className="text-xs text-gray-500 mb-2">Not included:</p>
-                    <div className="space-y-2">
-                      {plan.limitations.map((limitation) => (
-                        <div key={limitation} className="flex items-start gap-2">
-                          <span className="text-gray-400 text-sm">• {limitation}</span>
-                        </div>
-                      ))}
+                  <div className="mb-4">
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-3 ${
+                      isPopular
+                        ? 'bg-purple-500/20'
+                        : 'bg-gray-800'
+                    }`}>
+                      <Icon className={`w-6 h-6 ${isPopular ? 'text-purple-400' : 'text-gray-400'}`} />
                     </div>
+                    <h3 className="text-xl font-semibold text-white">{plan.name}</h3>
+                    <p className="text-sm text-gray-400 mt-1">{plan.description}</p>
                   </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
 
-        <div className="mt-16 text-center">
-          <p className="text-gray-600 mb-4">
-            All plans include access to GPT-4o, conversation history, and our beautiful interface
-          </p>
-          <p className="text-sm text-gray-500">
-            Need a custom plan for your school or organization?{' '}
-            <a href="mailto:sales@jumpstudyai.com" className="text-blue-600 hover:underline">
-              Contact us
-            </a>
-          </p>
+                  <div className="mb-6">
+                    <span className="text-4xl font-bold text-white">
+                      ${plan.price}
+                    </span>
+                    {plan.price > 0 && (
+                      <span className="text-gray-400">/month</span>
+                    )}
+                  </div>
+
+                  <ul className="space-y-3 mb-6">
+                    {plan.features.map((feature, idx) => (
+                      <li key={idx} className="flex items-start gap-2 text-sm text-gray-300">
+                        <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
+                        {feature}
+                      </li>
+                    ))}
+                  </ul>
+
+                  <button
+                    onClick={() => handleSubscribe(plan.id)}
+                    disabled={loadingPlan === plan.id}
+                    className={`w-full py-3 rounded-xl font-medium transition-all disabled:opacity-50 ${
+                      isPopular
+                        ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                        : plan.price === 0
+                        ? 'bg-gray-800 hover:bg-gray-700 text-white'
+                        : 'bg-white hover:bg-gray-100 text-gray-900'
+                    }`}
+                  >
+                    {loadingPlan === plan.id ? (
+                      <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+                    ) : plan.price === 0 ? (
+                      'Get Started Free'
+                    ) : (
+                      'Subscribe'
+                    )}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* FAQ / Info */}
+          <div className="mt-16 text-center">
+            <h2 className="text-2xl font-bold text-white mb-4">Frequently Asked Questions</h2>
+            <div className="max-w-2xl mx-auto space-y-4">
+              {[
+                {
+                  q: 'Can I cancel anytime?',
+                  a: 'Yes! You can cancel your subscription at any time. No questions asked.',
+                },
+                {
+                  q: 'Is the free plan really unlimited?',
+                  a: 'Yes! Chat, humanizer, and detector are unlimited. Only image/video generation has daily limits on free.',
+                },
+                {
+                  q: 'What payment methods do you accept?',
+                  a: 'We accept all major credit cards through Stripe. Your payment info is never stored on our servers.',
+                },
+              ].map(({ q, a }) => (
+                <div key={q} className="p-4 bg-gray-900 border border-gray-800 rounded-xl text-left">
+                  <p className="font-medium text-white mb-1">{q}</p>
+                  <p className="text-sm text-gray-400">{a}</p>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-      </div>
+      </main>
     </div>
-  );
+  )
 }
