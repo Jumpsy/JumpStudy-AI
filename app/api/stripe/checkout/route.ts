@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { planId } = await request.json()
+    const { planId, billingPeriod = 'monthly' } = await request.json()
     const plan = PRICING_PLANS[planId as keyof typeof PRICING_PLANS]
 
     if (!plan || plan.price === 0) {
@@ -55,13 +55,15 @@ export async function POST(request: NextRequest) {
         })
     }
 
-    // Create checkout session
+    // Create checkout session - use annual price if selected
     const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_SITE_URL || ''
-    const priceId = plan.priceId
+    const priceId = billingPeriod === 'annual' && plan.annualPriceId
+      ? plan.annualPriceId
+      : plan.priceId
 
     if (!priceId) {
       return NextResponse.json(
-        { error: 'Price not configured for this plan' },
+        { error: 'Price not configured for this plan. Please set up Stripe products first.' },
         { status: 400 }
       )
     }

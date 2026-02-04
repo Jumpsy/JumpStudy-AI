@@ -3,13 +3,14 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Navbar from '@/components/Navbar'
-import { Check, Sparkles, Zap, Users, Crown, Loader2 } from 'lucide-react'
-import { PRICING_PLANS } from '@/lib/pricing'
+import { Check, Sparkles, Zap, GraduationCap, Users, Loader2 } from 'lucide-react'
+import { PRICING_PLANS, getAnnualSavings } from '@/lib/pricing'
 import { createClient } from '@/lib/supabase/client'
 
 export default function PricingPage() {
   const router = useRouter()
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null)
+  const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'annual'>('monthly')
 
   const handleSubscribe = async (planId: string) => {
     if (planId === 'free') {
@@ -28,11 +29,24 @@ export default function PricingPage() {
         return
       }
 
+      // Check for student plan requirements
+      if (planId === 'student') {
+        const email = user.email || ''
+        if (!email.endsWith('.edu') && !email.includes('student')) {
+          alert('Student plan requires a .edu email address. Please update your email or choose another plan.')
+          setLoadingPlan(null)
+          return
+        }
+      }
+
       // Create checkout session
       const response = await fetch('/api/stripe/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planId }),
+        body: JSON.stringify({
+          planId,
+          billingPeriod,
+        }),
       })
 
       const data = await response.json()
@@ -54,10 +68,12 @@ export default function PricingPage() {
 
   const planIcons = {
     free: Sparkles,
-    plus: Zap,
+    pro: Zap,
+    student: GraduationCap,
     team: Users,
-    pro: Crown,
   }
+
+  const planOrder = ['free', 'pro', 'student', 'team']
 
   return (
     <div className="min-h-screen bg-gray-950">
@@ -66,28 +82,68 @@ export default function PricingPage() {
       <main className="pt-24 pb-12 px-4">
         <div className="max-w-6xl mx-auto">
           {/* Header */}
-          <div className="text-center mb-12">
+          <div className="text-center mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
               Simple, Transparent Pricing
             </h1>
             <p className="text-xl text-gray-400 max-w-2xl mx-auto">
-              20% cheaper than ChatGPT. All plans include unlimited AI chat, humanizer, and detector.
+              20% cheaper than ChatGPT. Built for students, by students.
             </p>
+          </div>
+
+          {/* Billing Toggle */}
+          <div className="flex justify-center mb-8">
+            <div className="bg-gray-900 p-1 rounded-xl flex items-center">
+              <button
+                onClick={() => setBillingPeriod('monthly')}
+                className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${
+                  billingPeriod === 'monthly'
+                    ? 'bg-purple-600 text-white'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Monthly
+              </button>
+              <button
+                onClick={() => setBillingPeriod('annual')}
+                className={`px-6 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                  billingPeriod === 'annual'
+                    ? 'bg-purple-600 text-white'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Annual
+                <span className="px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded-full">
+                  Save 33%
+                </span>
+              </button>
+            </div>
           </div>
 
           {/* Comparison Banner */}
           <div className="mb-12 p-4 bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/20 rounded-xl text-center">
             <p className="text-green-400">
               <span className="font-semibold">Save 20%</span> compared to ChatGPT Plus ($20/mo) -
-              Our Plus plan is just <span className="font-bold">$16/mo</span>!
+              Our Pro plan is just <span className="font-bold">
+                ${billingPeriod === 'monthly' ? '15.99' : '10.67'}/mo
+              </span>
+              {billingPeriod === 'annual' && ' (billed annually)'}!
             </p>
           </div>
 
           {/* Pricing Cards */}
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {Object.values(PRICING_PLANS).map((plan) => {
-              const Icon = planIcons[plan.id as keyof typeof planIcons]
+            {planOrder.map((planKey) => {
+              const plan = PRICING_PLANS[planKey as keyof typeof PRICING_PLANS]
+              const Icon = planIcons[planKey as keyof typeof planIcons]
               const isPopular = 'popular' in plan && plan.popular
+              const savings = getAnnualSavings(planKey)
+
+              const displayPrice = billingPeriod === 'annual' && plan.annualPrice
+                ? (plan.annualPrice / 12).toFixed(2)
+                : plan.price.toString()
+
+              const isPerUser = 'perUser' in plan && plan.perUser
 
               return (
                 <div
@@ -104,6 +160,12 @@ export default function PricingPage() {
                     </div>
                   )}
 
+                  {'requiresEdu' in plan && plan.requiresEdu && (
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-blue-600 rounded-full text-xs font-medium text-white">
+                      .edu Required
+                    </div>
+                  )}
+
                   <div className="mb-4">
                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-3 ${
                       isPopular
@@ -117,11 +179,30 @@ export default function PricingPage() {
                   </div>
 
                   <div className="mb-6">
-                    <span className="text-4xl font-bold text-white">
-                      ${plan.price}
-                    </span>
-                    {plan.price > 0 && (
-                      <span className="text-gray-400">/month</span>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-4xl font-bold text-white">
+                        ${displayPrice}
+                      </span>
+                      {plan.price > 0 && (
+                        <span className="text-gray-400">
+                          /{isPerUser ? 'user/' : ''}mo
+                        </span>
+                      )}
+                    </div>
+                    {billingPeriod === 'annual' && plan.price > 0 && (
+                      <p className="text-sm text-green-400 mt-1">
+                        Save ${savings.savings.toFixed(2)}/year ({savings.percentOff}% off)
+                      </p>
+                    )}
+                    {billingPeriod === 'annual' && plan.annualPrice && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Billed as ${plan.annualPrice}{isPerUser ? '/user' : ''}/year
+                      </p>
+                    )}
+                    {'minUsers' in plan && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Minimum {plan.minUsers} users
+                      </p>
                     )}
                   </div>
 
@@ -158,6 +239,22 @@ export default function PricingPage() {
             })}
           </div>
 
+          {/* Trust Badges */}
+          <div className="mt-12 flex flex-wrap justify-center gap-6 text-gray-400 text-sm">
+            <div className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-green-400" />
+              Cancel anytime
+            </div>
+            <div className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-green-400" />
+              Secure payments via Stripe
+            </div>
+            <div className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-green-400" />
+              No credit card for free tier
+            </div>
+          </div>
+
           {/* FAQ / Info */}
           <div className="mt-16 text-center">
             <h2 className="text-2xl font-bold text-white mb-4">Frequently Asked Questions</h2>
@@ -168,8 +265,12 @@ export default function PricingPage() {
                   a: 'Yes! You can cancel your subscription at any time. No questions asked.',
                 },
                 {
-                  q: 'Is the free plan really unlimited?',
-                  a: 'Yes! Chat, humanizer, and detector are unlimited. Only image/video generation has daily limits on free.',
+                  q: 'How does the Student plan work?',
+                  a: 'Sign up with a .edu email address to get 40% off our Pro plan. All features included!',
+                },
+                {
+                  q: 'What makes JumpStudy undetectable?',
+                  a: 'Our AI Humanizer transforms AI-generated text to bypass Turnitin, GPTZero, and other detectors.',
                 },
                 {
                   q: 'What payment methods do you accept?',
