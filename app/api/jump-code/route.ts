@@ -1,17 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from '@supabase/supabase-js';
 
 // Initialize Anthropic with YOUR API key (server-side only)
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 });
-
-// Supabase admin client for auth verification
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-);
 
 const MODELS: Record<string, string> = {
   opus: 'claude-opus-4-20250514',
@@ -19,49 +12,23 @@ const MODELS: Record<string, string> = {
   haiku: 'claude-haiku-4-20250514',
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// JUMP CODE API - FREE & UNLIMITED FOR EVERYONE
+// No login, no auth, no tracking, no limits
+// ═══════════════════════════════════════════════════════════════════════════
+
 export async function POST(request: NextRequest) {
   try {
-    // Get auth token from header
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.slice(7);
-
-    // Verify token and get user
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-
-    // Check subscription (Jump Code tier required)
-    const { data: profile } = await supabase
-      .from('users')
-      .select('subscription_tier')
-      .eq('id', user.id)
-      .single();
-
-    // Allow 'code' tier or any paid tier for now
-    const allowedTiers = ['code', 'pro', 'team', 'student', 'unlimited'];
-    if (!profile || !allowedTiers.includes(profile.subscription_tier)) {
-      return NextResponse.json({
-        error: 'Jump Code subscription required',
-        upgrade_url: 'https://jumpstudy.ai/pricing'
-      }, { status: 403 });
-    }
-
-    // Parse request
-    const { messages, model = 'opus', system } = await request.json();
+    // Parse request - no auth required
+    const { messages, model = 'sonnet', system } = await request.json();
 
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json({ error: 'Messages required' }, { status: 400 });
     }
 
-    const modelId = MODELS[model] || MODELS.opus;
+    const modelId = MODELS[model] || MODELS.sonnet;
 
-    // Tools definition (same as Claude Code)
+    // Tools definition - full Claude Code capabilities
     const tools: Anthropic.Tool[] = [
       {
         name: 'Bash',
@@ -108,6 +75,7 @@ export async function POST(request: NextRequest) {
             file_path: { type: 'string', description: 'Path to file' },
             old_string: { type: 'string', description: 'Text to replace' },
             new_string: { type: 'string', description: 'Replacement text' },
+            replace_all: { type: 'boolean', description: 'Replace all occurrences' },
           },
           required: ['file_path', 'old_string', 'new_string'],
         },
@@ -137,18 +105,178 @@ export async function POST(request: NextRequest) {
           required: ['pattern'],
         },
       },
+      {
+        name: 'WebFetch',
+        description: 'Fetch content from a URL.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            url: { type: 'string', description: 'URL to fetch' },
+          },
+          required: ['url'],
+        },
+      },
+      {
+        name: 'WebSearch',
+        description: 'Search the web.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            query: { type: 'string', description: 'Search query' },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'Screenshot',
+        description: 'Take a screenshot.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            filename: { type: 'string', description: 'Output filename' },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'MouseMove',
+        description: 'Move mouse cursor.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            x: { type: 'number', description: 'X coordinate' },
+            y: { type: 'number', description: 'Y coordinate' },
+          },
+          required: ['x', 'y'],
+        },
+      },
+      {
+        name: 'MouseClick',
+        description: 'Click mouse button.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            button: { type: 'string', description: 'Button: left, right, middle' },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'Keyboard',
+        description: 'Type text or press keys.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            text: { type: 'string', description: 'Text to type' },
+            keys: { type: 'string', description: 'Keys to press' },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'TodoWrite',
+        description: 'Update todo list.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            todos: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  content: { type: 'string' },
+                  status: { type: 'string' },
+                },
+              },
+            },
+          },
+          required: ['todos'],
+        },
+      },
+      {
+        name: 'CreateAutomation',
+        description: 'Create a reusable automation.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            name: { type: 'string', description: 'Automation name' },
+            description: { type: 'string', description: 'Description' },
+            trigger: { type: 'string', description: 'Trigger condition' },
+            actions: { type: 'array', items: { type: 'string' }, description: 'Commands to run' },
+          },
+          required: ['name', 'description', 'actions'],
+        },
+      },
+      {
+        name: 'RunAutomation',
+        description: 'Run a saved automation.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            name: { type: 'string', description: 'Automation name or ID' },
+          },
+          required: ['name'],
+        },
+      },
+      {
+        name: 'SelfModify',
+        description: 'Modify own source code (requires master code).',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            new_source: { type: 'string', description: 'New source code' },
+          },
+          required: ['new_source'],
+        },
+      },
+      {
+        name: 'ReadSelf',
+        description: 'Read own source code.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {},
+          required: [],
+        },
+      },
+      {
+        name: 'Task',
+        description: 'Spawn a sub-agent for parallel work.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            description: { type: 'string', description: 'Task description' },
+            prompt: { type: 'string', description: 'Task prompt' },
+          },
+          required: ['description', 'prompt'],
+        },
+      },
+      {
+        name: 'NotebookEdit',
+        description: 'Edit a Jupyter notebook.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            notebook_path: { type: 'string', description: 'Path to notebook' },
+            cell_number: { type: 'number', description: 'Cell index' },
+            new_source: { type: 'string', description: 'New cell source' },
+            edit_mode: { type: 'string', description: 'replace, insert, or delete' },
+            cell_type: { type: 'string', description: 'code or markdown' },
+          },
+          required: ['notebook_path', 'new_source'],
+        },
+      },
     ];
 
     // Call Anthropic API
     const response = await anthropic.messages.create({
       model: modelId,
       max_tokens: 16384,
-      system: system || 'You are Jump Code, an AI coding assistant.',
+      system: system || 'You are Jump Code, an AI coding assistant with full computer control.',
       tools,
       messages,
     });
 
-    // Return response (no logging, no tracking)
+    // Return response - no logging, no tracking
     return NextResponse.json({
       content: response.content,
       stop_reason: response.stop_reason,
