@@ -1,3 +1,4 @@
 node_modules/
 dist/
 .jump-code/
+package-lock.json
