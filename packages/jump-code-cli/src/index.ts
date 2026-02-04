@@ -7,25 +7,22 @@ import * as path from 'path';
 import * as readline from 'readline';
 import * as crypto from 'crypto';
 import * as https from 'https';
-import * as http from 'http';
 import { fileURLToPath } from 'url';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 
 // ═══════════════════════════════════════════════════════════════════════════
-// JUMP CODE - Claude Code Clone (Direct Anthropic Connection)
+// JUMP CODE - Free Claude Code Clone (Powered by JumpStudy)
 // ═══════════════════════════════════════════════════════════════════════════
 
 const CONFIG_DIR = path.join(process.env.HOME || process.env.USERPROFILE || '~', '.jump-code');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const MEMORY_DIR = path.join(CONFIG_DIR, 'memory');
 
-const MODELS: Record<string, string> = {
-  opus: 'claude-opus-4-20250514',
-  sonnet: 'claude-sonnet-4-20250514',
-  haiku: 'claude-haiku-4-20250514',
-};
+// JumpStudy wrapper API - free for everyone
+const API_HOST = 'jumpstudy.ai';
+const API_PATH = '/api/jump-code';
 
 type ModelName = 'opus' | 'sonnet' | 'haiku';
 
@@ -43,7 +40,6 @@ const c = {
 };
 
 interface Config {
-  apiKey?: string;
   model: ModelName;
 }
 
@@ -51,81 +47,6 @@ interface Message {
   role: 'user' | 'assistant';
   content: string | any[];
 }
-
-// Tool definitions
-const tools = [
-  {
-    name: 'Bash',
-    description: 'Execute a bash command in the terminal.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        command: { type: 'string', description: 'The command to execute' },
-      },
-      required: ['command'],
-    },
-  },
-  {
-    name: 'Read',
-    description: 'Read the contents of a file.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        file_path: { type: 'string', description: 'Path to the file' },
-      },
-      required: ['file_path'],
-    },
-  },
-  {
-    name: 'Write',
-    description: 'Write content to a file.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        file_path: { type: 'string', description: 'Path to the file' },
-        content: { type: 'string', description: 'Content to write' },
-      },
-      required: ['file_path', 'content'],
-    },
-  },
-  {
-    name: 'Edit',
-    description: 'Edit a file by replacing text.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        file_path: { type: 'string', description: 'Path to the file' },
-        old_string: { type: 'string', description: 'Text to find' },
-        new_string: { type: 'string', description: 'Text to replace with' },
-      },
-      required: ['file_path', 'old_string', 'new_string'],
-    },
-  },
-  {
-    name: 'Glob',
-    description: 'Find files matching a pattern.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        pattern: { type: 'string', description: 'Glob pattern' },
-        path: { type: 'string', description: 'Directory to search' },
-      },
-      required: ['pattern'],
-    },
-  },
-  {
-    name: 'Grep',
-    description: 'Search for text in files.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        pattern: { type: 'string', description: 'Search pattern' },
-        path: { type: 'string', description: 'File or directory' },
-      },
-      required: ['pattern'],
-    },
-  },
-];
 
 class JumpCode {
   private config: Config = { model: 'sonnet' };
@@ -175,29 +96,10 @@ class JumpCode {
     await fs.writeFile(file, JSON.stringify(this.history.slice(-100), null, 2));
   }
 
-  private async setupApiKey(): Promise<boolean> {
-    console.log(`\n${c.cyan}${c.bold}  Welcome to Jump Code${c.reset}\n`);
-    console.log(`  ${c.dim}Enter your Anthropic API key to get started.${c.reset}`);
-    console.log(`  ${c.dim}Get one at: https://console.anthropic.com${c.reset}\n`);
-
-    const key = await this.question(`  ${c.dim}API Key:${c.reset} `);
-
-    if (!key || !key.startsWith('sk-ant-')) {
-      console.log(`\n  ${c.red}Invalid API key${c.reset}\n`);
-      return false;
-    }
-
-    this.config.apiKey = key.trim();
-    await this.saveConfig();
-    console.log(`\n  ${c.green}✓ API key saved${c.reset}\n`);
-    return true;
-  }
-
-  private async callAnthropic(messages: Message[]): Promise<any> {
+  private async callAPI(messages: Message[]): Promise<any> {
     return new Promise((resolve, reject) => {
       const data = JSON.stringify({
-        model: MODELS[this.config.model],
-        max_tokens: 8192,
+        model: this.config.model,
         system: `You are Jump Code, an AI coding assistant. You have access to tools to help with coding tasks.
 
 Working directory: ${this.cwd}
@@ -207,19 +109,17 @@ Rules:
 - Execute tasks, don't just explain
 - Read files before editing
 - Be concise`,
-        tools,
         messages,
       });
 
       const req = https.request({
-        hostname: 'api.anthropic.com',
+        hostname: API_HOST,
         port: 443,
-        path: '/v1/messages',
+        path: API_PATH,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': this.config.apiKey!,
-          'anthropic-version': '2023-06-01',
+          'Content-Length': Buffer.byteLength(data),
         },
       }, (res) => {
         let body = '';
@@ -228,7 +128,7 @@ Rules:
           try {
             const json = JSON.parse(body);
             if (json.error) {
-              reject(new Error(json.error.message));
+              reject(new Error(json.error));
             } else {
               resolve(json);
             }
@@ -344,7 +244,7 @@ Rules:
   private async chat(message: string): Promise<string> {
     this.history.push({ role: 'user', content: message });
 
-    let response = await this.callAnthropic(this.history);
+    let response = await this.callAPI(this.history);
 
     // Agentic loop
     while (response.stop_reason === 'tool_use') {
@@ -367,7 +267,7 @@ Rules:
       this.history.push({ role: 'assistant', content: response.content });
       this.history.push({ role: 'user', content: toolResults });
 
-      response = await this.callAnthropic(this.history);
+      response = await this.callAPI(this.history);
     }
 
     const text = response.content
@@ -387,22 +287,14 @@ Rules:
 
   private printHeader(): void {
     const dir = this.cwd.replace(process.env.HOME || '', '~');
-    console.log(`\n${c.dim}${dir}${c.reset}`);
+    console.log(`\n${c.cyan}${c.bold}  Jump Code${c.reset} ${c.dim}v2.2.0${c.reset}`);
+    console.log(`${c.dim}  Free & unlimited - powered by JumpStudy${c.reset}\n`);
+    console.log(`${c.dim}${dir}${c.reset}`);
     console.log(`${c.dim}Model: ${this.config.model} | /help for commands${c.reset}\n`);
   }
 
   async run(): Promise<void> {
     await this.init();
-
-    // Setup API key if needed
-    if (!this.config.apiKey) {
-      const success = await this.setupApiKey();
-      if (!success) {
-        this.rl.close();
-        process.exit(1);
-      }
-    }
-
     this.printHeader();
 
     // Main loop
@@ -423,9 +315,9 @@ Rules:
       }
 
       if (input === '/model') {
-        console.log(`\n  1) opus   - Most capable`);
-        console.log(`  2) sonnet - Balanced`);
-        console.log(`  3) haiku  - Fastest\n`);
+        console.log(`\n  1) opus   - Claude Opus 4.5 (Most capable)`);
+        console.log(`  2) sonnet - Claude Sonnet 4 (Balanced)`);
+        console.log(`  3) haiku  - Claude Haiku 4 (Fastest)\n`);
         const choice = await this.question(`  Choice: `);
         const models: ModelName[] = ['opus', 'sonnet', 'haiku'];
         const idx = parseInt(choice) - 1;
@@ -437,18 +329,16 @@ Rules:
         continue;
       }
 
-      if (input === '/key') {
-        await this.setupApiKey();
-        continue;
-      }
-
       if (input === '/help') {
         console.log(`
   ${c.bold}Commands${c.reset}
-  /model  - Change model
-  /key    - Change API key
+  /model  - Change model (opus/sonnet/haiku)
   /clear  - Clear conversation
   /exit   - Exit
+
+  ${c.bold}About${c.reset}
+  Jump Code is a free Claude Code alternative.
+  Powered by JumpStudy - https://jumpstudy.ai
 `);
         continue;
       }
@@ -468,7 +358,7 @@ const args = process.argv.slice(2);
 
 if (args.includes('-h') || args.includes('--help')) {
   console.log(`
-${c.bold}Jump Code${c.reset} - AI coding assistant
+${c.bold}Jump Code${c.reset} - Free AI coding assistant
 
 Usage: jump-code [options]
 
@@ -479,9 +369,11 @@ Options:
 
 Commands (in chat):
   /model  - Change model (opus/sonnet/haiku)
-  /key    - Change API key
   /clear  - Clear conversation
   /exit   - Exit
+
+Free & unlimited - powered by JumpStudy
+https://jumpstudy.ai
 `);
   process.exit(0);
 }
