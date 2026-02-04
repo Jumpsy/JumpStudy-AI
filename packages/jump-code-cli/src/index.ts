@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import Anthropic from '@anthropic-ai/sdk';
+import { createClient } from '@supabase/supabase-js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs/promises';
@@ -11,22 +11,20 @@ import * as crypto from 'crypto';
 const execAsync = promisify(exec);
 
 // ═══════════════════════════════════════════════════════════════════
-// CONFIG
+// CONFIG - Connects to YOUR wrapper API
 // ═══════════════════════════════════════════════════════════════════
+
+const API_URL = process.env.JUMPCODE_API_URL || 'https://jumpstudy.ai/api/jump-code';
+const SUPABASE_URL = 'https://sthumeeyjjmtpnkwpdpw.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN0aHVtZWV5amptdHBua3dwZHB3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1NzE2ODAsImV4cCI6MjA4NTE0NzY4MH0.G36_hvGCcy7lanZUO66ZtKgRaDQrtHY6xJsCfzA1ujY';
 
 const CONFIG_DIR = path.join(process.env.HOME || process.env.USERPROFILE || '~', '.jump-code');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const MEMORY_DIR = path.join(CONFIG_DIR, 'memory');
+const SESSION_FILE = path.join(CONFIG_DIR, 'session.json');
 
-const MODELS = {
-  opus: 'claude-opus-4-20250514',
-  sonnet: 'claude-sonnet-4-20250514',
-  haiku: 'claude-haiku-4-20250514',
-} as const;
+type ModelName = 'opus' | 'sonnet' | 'haiku';
 
-type ModelName = keyof typeof MODELS;
-
-// Colors - no external deps
 const c = {
   reset: '\x1b[0m',
   bold: '\x1b[1m',
@@ -37,107 +35,35 @@ const c = {
   blue: '\x1b[34m',
   magenta: '\x1b[35m',
   cyan: '\x1b[36m',
-  white: '\x1b[37m',
 };
 
 interface Config {
-  apiKey?: string;
-  model?: ModelName;
+  model: ModelName;
+  sessionToken?: string;
+  refreshToken?: string;
+  email?: string;
+  tokenRotation: number;
+}
+
+interface Message {
+  role: 'user' | 'assistant';
+  content: string | any[];
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// TOOLS - Same as Claude Code
-// ═══════════════════════════════════════════════════════════════════
-
-const tools: Anthropic.Tool[] = [
-  {
-    name: 'Bash',
-    description: 'Execute a bash command. Use for git, npm, python, running scripts, etc.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        command: { type: 'string', description: 'The command to execute' },
-      },
-      required: ['command'],
-    },
-  },
-  {
-    name: 'Read',
-    description: 'Read file contents. Always read before editing.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        file_path: { type: 'string', description: 'Absolute or relative path' },
-        offset: { type: 'number', description: 'Start line (optional)' },
-        limit: { type: 'number', description: 'Number of lines (optional)' },
-      },
-      required: ['file_path'],
-    },
-  },
-  {
-    name: 'Write',
-    description: 'Write content to a file. Creates directories if needed.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        file_path: { type: 'string', description: 'Path to file' },
-        content: { type: 'string', description: 'Content to write' },
-      },
-      required: ['file_path', 'content'],
-    },
-  },
-  {
-    name: 'Edit',
-    description: 'Edit file by replacing exact text. Must be unique in file.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        file_path: { type: 'string', description: 'Path to file' },
-        old_string: { type: 'string', description: 'Exact text to replace' },
-        new_string: { type: 'string', description: 'Replacement text' },
-      },
-      required: ['file_path', 'old_string', 'new_string'],
-    },
-  },
-  {
-    name: 'Glob',
-    description: 'Find files by pattern.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        pattern: { type: 'string', description: 'Glob pattern like **/*.ts' },
-        path: { type: 'string', description: 'Search directory' },
-      },
-      required: ['pattern'],
-    },
-  },
-  {
-    name: 'Grep',
-    description: 'Search file contents.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        pattern: { type: 'string', description: 'Search pattern' },
-        path: { type: 'string', description: 'File or directory' },
-        include: { type: 'string', description: 'File filter like *.ts' },
-      },
-      required: ['pattern'],
-    },
-  },
-];
-
-// ═══════════════════════════════════════════════════════════════════
-// JUMP CODE
+// JUMP CODE CLI - Wrapper Edition
 // ═══════════════════════════════════════════════════════════════════
 
 class JumpCode {
-  private anthropic!: Anthropic;
-  private config: Config = { model: 'opus' };
+  private supabase;
+  private config: Config = { model: 'opus', tokenRotation: 0 };
   private cwd: string;
-  private history: Anthropic.MessageParam[] = [];
+  private history: Message[] = [];
   private rl!: readline.Interface;
+  private requestCount = 0;
 
   constructor() {
+    this.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     this.cwd = process.cwd();
   }
 
@@ -145,13 +71,11 @@ class JumpCode {
     await fs.mkdir(CONFIG_DIR, { recursive: true });
     await fs.mkdir(MEMORY_DIR, { recursive: true });
 
-    // Load config
     try {
       const data = await fs.readFile(CONFIG_FILE, 'utf-8');
       this.config = { ...this.config, ...JSON.parse(data) };
     } catch {}
 
-    // Load memory for this project
     await this.loadMemory();
 
     this.rl = readline.createInterface({
@@ -174,19 +98,177 @@ class JumpCode {
       const data = await fs.readFile(file, 'utf-8');
       this.history = JSON.parse(data);
       if (this.history.length > 0) {
-        this.print(`${c.dim}  ✓ Restored ${Math.floor(this.history.length / 2)} messages from memory${c.reset}\n`);
+        this.print(`${c.dim}  ✓ Restored ${Math.floor(this.history.length / 2)} messages${c.reset}\n`);
       }
     } catch {}
   }
 
   private async saveMemory(): Promise<void> {
     const file = path.join(MEMORY_DIR, `${this.hashPath(this.cwd)}.json`);
-    // Keep last 200 messages
     await fs.writeFile(file, JSON.stringify(this.history.slice(-200), null, 2));
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // Tool execution
+  // Auth - JumpStudy Account
+  // ─────────────────────────────────────────────────────────────────
+
+  private async refreshSession(): Promise<boolean> {
+    if (!this.config.refreshToken) return false;
+
+    try {
+      const { data, error } = await this.supabase.auth.refreshSession({
+        refresh_token: this.config.refreshToken,
+      });
+
+      if (error || !data.session) return false;
+
+      this.config.sessionToken = data.session.access_token;
+      this.config.refreshToken = data.session.refresh_token;
+      this.config.tokenRotation++;
+      await this.saveConfig();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async checkAuth(): Promise<boolean> {
+    if (!this.config.sessionToken) return false;
+
+    // Rotate token every 10 requests for stealth
+    if (this.requestCount > 0 && this.requestCount % 10 === 0) {
+      await this.refreshSession();
+    }
+
+    try {
+      const { data: { user } } = await this.supabase.auth.getUser(this.config.sessionToken);
+      return !!user;
+    } catch {
+      return await this.refreshSession();
+    }
+  }
+
+  private async login(): Promise<boolean> {
+    console.log(`\n${c.cyan}${c.bold}  🔐 Jump Code Login${c.reset}\n`);
+    console.log(`  ${c.dim}Login with your JumpStudy account${c.reset}\n`);
+
+    const email = await this.question(`  ${c.dim}Email:${c.reset} `);
+    const password = await this.questionHidden(`  ${c.dim}Password:${c.reset} `);
+
+    try {
+      const { data, error } = await this.supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        this.print(`\n  ${c.red}✗ ${error.message}${c.reset}\n`);
+        return false;
+      }
+
+      this.config.sessionToken = data.session.access_token;
+      this.config.refreshToken = data.session.refresh_token;
+      this.config.email = data.user.email;
+      await this.saveConfig();
+
+      this.print(`\n  ${c.green}✓ Logged in as ${data.user.email}${c.reset}\n`);
+      return true;
+    } catch (e: any) {
+      this.print(`\n  ${c.red}✗ ${e.message}${c.reset}\n`);
+      return false;
+    }
+  }
+
+  private async signup(): Promise<boolean> {
+    console.log(`\n${c.cyan}${c.bold}  📝 Create Account${c.reset}\n`);
+
+    const email = await this.question(`  ${c.dim}Email:${c.reset} `);
+    const password = await this.questionHidden(`  ${c.dim}Password:${c.reset} `);
+
+    try {
+      const { data, error } = await this.supabase.auth.signUp({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        this.print(`\n  ${c.red}✗ ${error.message}${c.reset}\n`);
+        return false;
+      }
+
+      this.print(`\n  ${c.green}✓ Account created! Check your email to verify.${c.reset}\n`);
+      return false; // Need to verify email first
+    } catch (e: any) {
+      this.print(`\n  ${c.red}✗ ${e.message}${c.reset}\n`);
+      return false;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // API Call - Through YOUR Wrapper
+  // ─────────────────────────────────────────────────────────────────
+
+  private generateRequestId(): string {
+    return crypto.randomBytes(16).toString('hex');
+  }
+
+  private async callAPI(messages: Message[]): Promise<any> {
+    this.requestCount++;
+
+    // Rotate session token periodically
+    if (this.requestCount % 10 === 0) {
+      await this.refreshSession();
+    }
+
+    const requestId = this.generateRequestId();
+    const timestamp = Date.now();
+
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.config.sessionToken}`,
+        'X-Request-ID': requestId,
+        'X-Timestamp': timestamp.toString(),
+        'X-Client-Version': '1.0.0',
+        'User-Agent': `JumpCode/${this.config.tokenRotation}`,
+      },
+      body: JSON.stringify({
+        messages,
+        model: this.config.model,
+        system: this.buildSystemPrompt(),
+        _rid: requestId,
+        _ts: timestamp,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  private buildSystemPrompt(): string {
+    return `You are Jump Code, an elite AI coding assistant running in the user's terminal. You have FULL system access through tools.
+
+TOOLS: Bash, Read, Write, Edit, Glob, Grep
+
+RULES:
+1. DO things, don't just explain
+2. Read files BEFORE editing
+3. Verify changes work
+4. Be concise
+
+CONTEXT:
+- Dir: ${this.cwd}
+- Platform: ${process.platform}
+- Model: ${this.config.model}`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Tool Execution - Local
   // ─────────────────────────────────────────────────────────────────
 
   private async runTool(name: string, input: Record<string, any>): Promise<string> {
@@ -198,7 +280,6 @@ class JumpCode {
             cwd: this.cwd,
             timeout: 300000,
             maxBuffer: 50 * 1024 * 1024,
-            env: { ...process.env, FORCE_COLOR: '1' },
           });
           if (stdout) {
             const lines = stdout.split('\n');
@@ -217,14 +298,8 @@ class JumpCode {
         this.print(`${c.blue}  📖 ${input.file_path}${c.reset}\n`);
         try {
           const p = path.isAbsolute(input.file_path) ? input.file_path : path.join(this.cwd, input.file_path);
-          let content = await fs.readFile(p, 'utf-8');
-          const lines = content.split('\n');
-          if (input.offset || input.limit) {
-            const start = input.offset || 0;
-            const end = input.limit ? start + input.limit : lines.length;
-            content = lines.slice(start, end).join('\n');
-          }
-          return JSON.stringify({ content, lines: lines.length });
+          const content = await fs.readFile(p, 'utf-8');
+          return JSON.stringify({ content, lines: content.split('\n').length });
         } catch (e: any) {
           return JSON.stringify({ error: e.message });
         }
@@ -239,7 +314,6 @@ class JumpCode {
           this.print(`${c.green}  ✓ Written${c.reset}\n`);
           return JSON.stringify({ success: true });
         } catch (e: any) {
-          this.print(`${c.red}  ✗ ${e.message}${c.reset}\n`);
           return JSON.stringify({ error: e.message });
         }
       }
@@ -250,15 +324,13 @@ class JumpCode {
           const p = path.isAbsolute(input.file_path) ? input.file_path : path.join(this.cwd, input.file_path);
           let content = await fs.readFile(p, 'utf-8');
           if (!content.includes(input.old_string)) {
-            this.print(`${c.red}  ✗ Text not found${c.reset}\n`);
-            return JSON.stringify({ error: 'old_string not found in file' });
+            return JSON.stringify({ error: 'Text not found' });
           }
           content = content.replace(input.old_string, input.new_string);
           await fs.writeFile(p, content, 'utf-8');
           this.print(`${c.green}  ✓ Edited${c.reset}\n`);
           return JSON.stringify({ success: true });
         } catch (e: any) {
-          this.print(`${c.red}  ✗ ${e.message}${c.reset}\n`);
           return JSON.stringify({ error: e.message });
         }
       }
@@ -266,11 +338,8 @@ class JumpCode {
       case 'Glob': {
         this.print(`${c.blue}  🔍 ${input.pattern}${c.reset}\n`);
         try {
-          const dir = input.path || this.cwd;
-          const { stdout } = await execAsync(`find "${dir}" -type f -name "${input.pattern}" 2>/dev/null | head -100`, { cwd: this.cwd });
-          const files = stdout.trim().split('\n').filter(Boolean);
-          this.print(`${c.dim}  Found ${files.length} files${c.reset}\n`);
-          return JSON.stringify({ files });
+          const { stdout } = await execAsync(`find "${input.path || this.cwd}" -type f -name "${input.pattern}" 2>/dev/null | head -100`, { cwd: this.cwd });
+          return JSON.stringify({ files: stdout.trim().split('\n').filter(Boolean) });
         } catch {
           return JSON.stringify({ files: [] });
         }
@@ -279,12 +348,9 @@ class JumpCode {
       case 'Grep': {
         this.print(`${c.blue}  🔍 "${input.pattern}"${c.reset}\n`);
         try {
-          const dir = input.path || this.cwd;
           const inc = input.include ? `--include="${input.include}"` : '';
-          const { stdout } = await execAsync(`grep -rn ${inc} "${input.pattern}" "${dir}" 2>/dev/null | head -100`, { cwd: this.cwd });
-          const matches = stdout.trim().split('\n').filter(Boolean);
-          this.print(`${c.dim}  Found ${matches.length} matches${c.reset}\n`);
-          return JSON.stringify({ matches });
+          const { stdout } = await execAsync(`grep -rn ${inc} "${input.pattern}" "${input.path || this.cwd}" 2>/dev/null | head -100`, { cwd: this.cwd });
+          return JSON.stringify({ matches: stdout.trim().split('\n').filter(Boolean) });
         } catch {
           return JSON.stringify({ matches: [] });
         }
@@ -296,66 +362,41 @@ class JumpCode {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // Chat
+  // Chat Loop
   // ─────────────────────────────────────────────────────────────────
 
   private async chat(message: string): Promise<string> {
     this.history.push({ role: 'user', content: message });
 
-    const system = `You are Jump Code, an elite AI coding assistant in the terminal. You have FULL system access.
+    let response = await this.callAPI(this.history);
 
-TOOLS: Bash, Read, Write, Edit, Glob, Grep
-
-RULES:
-1. DO things, don't just explain
-2. Read files BEFORE editing
-3. Verify changes work
-4. Be concise
-
-CONTEXT:
-- Dir: ${this.cwd}
-- Platform: ${process.platform}
-- Model: ${this.config.model}`;
-
-    const model = MODELS[this.config.model || 'opus'];
-
-    let response = await this.anthropic.messages.create({
-      model,
-      max_tokens: 16384,
-      system,
-      tools,
-      messages: this.history,
-    });
-
-    // Agentic loop
+    // Agentic loop - process tool calls
     while (response.stop_reason === 'tool_use') {
-      const results: Anthropic.ToolResultBlockParam[] = [];
+      const toolResults: any[] = [];
 
       for (const block of response.content) {
-        if (block.type === 'text' && block.text.trim()) {
+        if (block.type === 'text' && block.text?.trim()) {
           this.print(`\n${block.text}\n`);
         }
         if (block.type === 'tool_use') {
-          const result = await this.runTool(block.name, block.input as Record<string, any>);
-          results.push({ type: 'tool_result', tool_use_id: block.id, content: result });
+          const result = await this.runTool(block.name, block.input);
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: result,
+          });
         }
       }
 
       this.history.push({ role: 'assistant', content: response.content });
-      this.history.push({ role: 'user', content: results });
+      this.history.push({ role: 'user', content: toolResults });
 
-      response = await this.anthropic.messages.create({
-        model,
-        max_tokens: 16384,
-        system,
-        tools,
-        messages: this.history,
-      });
+      response = await this.callAPI(this.history);
     }
 
     const text = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map(b => b.text)
+      .filter((b: any) => b.type === 'text')
+      .map((b: any) => b.text)
       .join('\n');
 
     this.history.push({ role: 'assistant', content: response.content });
@@ -376,7 +417,7 @@ CONTEXT:
     return new Promise(resolve => this.rl.question(prompt, resolve));
   }
 
-  private async questionHidden(prompt: string): Promise<string> {
+  private questionHidden(prompt: string): Promise<string> {
     return new Promise(resolve => {
       process.stdout.write(prompt);
       let input = '';
@@ -384,18 +425,18 @@ CONTEXT:
       if (stdin.isTTY) stdin.setRawMode(true);
 
       const handler = (ch: Buffer) => {
-        const c = ch.toString();
-        if (c === '\n' || c === '\r') {
+        const char = ch.toString();
+        if (char === '\n' || char === '\r') {
           stdin.removeListener('data', handler);
           if (stdin.isTTY) stdin.setRawMode(false);
           process.stdout.write('\n');
           resolve(input);
-        } else if (c === '\u0003') {
+        } else if (char === '\u0003') {
           process.exit();
-        } else if (c === '\u007f') {
+        } else if (char === '\u007f') {
           input = input.slice(0, -1);
         } else {
-          input += c;
+          input += char;
         }
       };
       stdin.on('data', handler);
@@ -412,7 +453,8 @@ ${c.cyan}${c.bold}  ╭───────────────────
   ╰────────────────────────────────────────────────╯${c.reset}
 
   ${c.dim}Directory: ${this.cwd}${c.reset}
-  ${c.dim}Model: ${c.cyan}${this.config.model}${c.reset} ${c.dim}| /model to switch | /help for commands${c.reset}
+  ${c.dim}Model: ${c.cyan}${this.config.model}${c.reset} ${c.dim}| Logged in as ${this.config.email || 'Unknown'}${c.reset}
+  ${c.dim}Commands: /model, /clear, /forget, /logout, /help, /exit${c.reset}
 `);
   }
 
@@ -423,25 +465,34 @@ ${c.cyan}${c.bold}  ╭───────────────────
   async run(): Promise<void> {
     await this.init();
 
-    // Check API key
-    if (!this.config.apiKey) {
+    // Check auth
+    const isAuthed = await this.checkAuth();
+
+    if (!isAuthed) {
       console.log(`
 ${c.cyan}${c.bold}  ⚡ Welcome to Jump Code${c.reset}
 
-  ${c.dim}Enter your Anthropic API key to get started.${c.reset}
-  ${c.dim}Get one at: https://console.anthropic.com/${c.reset}
+  ${c.dim}Unlimited Claude AI in your terminal.${c.reset}
+
+  ${c.yellow}1${c.reset}) Login
+  ${c.yellow}2${c.reset}) Create Account
 `);
-      const key = await this.questionHidden(`  ${c.dim}API Key:${c.reset} `);
-      if (!key.startsWith('sk-ant-')) {
-        console.log(`${c.red}  Invalid key format${c.reset}`);
+      const choice = await this.question(`  ${c.dim}Choice:${c.reset} `);
+
+      let success = false;
+      if (choice === '1') {
+        success = await this.login();
+      } else if (choice === '2') {
+        await this.signup();
+        success = await this.login();
+      }
+
+      if (!success) {
+        this.rl.close();
         process.exit(1);
       }
-      this.config.apiKey = key;
-      await this.saveConfig();
-      console.log(`${c.green}  ✓ Saved!${c.reset}\n`);
     }
 
-    this.anthropic = new Anthropic({ apiKey: this.config.apiKey });
     this.printHeader();
 
     // Main loop
@@ -450,7 +501,7 @@ ${c.cyan}${c.bold}  ⚡ Welcome to Jump Code${c.reset}
       if (!input) continue;
 
       // Commands
-      if (input === '/exit' || input === 'exit' || input === 'quit') {
+      if (input === '/exit' || input === 'exit') {
         await this.saveMemory();
         console.log(`\n${c.cyan}  👋 Later!${c.reset}\n`);
         process.exit(0);
@@ -468,6 +519,16 @@ ${c.cyan}${c.bold}  ⚡ Welcome to Jump Code${c.reset}
         try { await fs.unlink(path.join(MEMORY_DIR, `${this.hashPath(this.cwd)}.json`)); } catch {}
         console.log(`${c.green}  ✓ Memory wiped${c.reset}`);
         continue;
+      }
+
+      if (input === '/logout') {
+        this.config.sessionToken = undefined;
+        this.config.refreshToken = undefined;
+        this.config.email = undefined;
+        await this.saveConfig();
+        console.log(`${c.green}  ✓ Logged out${c.reset}`);
+        this.rl.close();
+        process.exit(0);
       }
 
       if (input === '/model') {
@@ -489,16 +550,11 @@ ${c.cyan}${c.bold}  ⚡ Welcome to Jump Code${c.reset}
       if (input === '/help') {
         console.log(`
 ${c.cyan}${c.bold}  Commands${c.reset}
-  ${c.yellow}/model${c.reset}   Switch AI model (opus/sonnet/haiku)
+  ${c.yellow}/model${c.reset}   Switch model (opus/sonnet/haiku)
   ${c.yellow}/clear${c.reset}   Clear conversation
   ${c.yellow}/forget${c.reset}  Wipe all memory
+  ${c.yellow}/logout${c.reset}  Logout
   ${c.yellow}/exit${c.reset}    Exit
-
-${c.cyan}${c.bold}  Tips${c.reset}
-  ${c.dim}• Full file system access
-  • Run any command
-  • Memory persists per project
-  • Just say what you want!${c.reset}
 `);
         continue;
       }
@@ -520,6 +576,16 @@ ${c.cyan}${c.bold}  Tips${c.reset}
         clearInterval(spin);
         process.stdout.write('\r                    \r');
         console.log(`${c.red}  Error: ${e.message}${c.reset}`);
+
+        // Try to refresh token on auth errors
+        if (e.message.includes('401') || e.message.includes('Unauthorized')) {
+          const refreshed = await this.refreshSession();
+          if (!refreshed) {
+            console.log(`${c.yellow}  Session expired. Please login again.${c.reset}`);
+            this.config.sessionToken = undefined;
+            await this.saveConfig();
+          }
+        }
       }
     }
   }
@@ -541,12 +607,13 @@ ${c.yellow}Commands:${c.reset}
   /model   Switch model (opus/sonnet/haiku)
   /clear   Clear conversation
   /forget  Wipe memory
+  /logout  Logout
   /exit    Exit
 
 ${c.yellow}Options:${c.reset}
   -h, --help     Help
   -v, --version  Version
-  --reset        Reset config
+  --reset        Reset all data
 `);
   process.exit(0);
 }
