@@ -26,6 +26,7 @@ export const PRICING_PLANS = {
       detectorPerDay: 5,
       studySets: 3,
       priority: false,
+      claudeAccess: false,
     },
   },
   pro: {
@@ -57,6 +58,7 @@ export const PRICING_PLANS = {
       detectorPerDay: -1,
       studySets: -1,
       priority: true,
+      claudeAccess: false,
     },
   },
   student: {
@@ -88,12 +90,43 @@ export const PRICING_PLANS = {
       detectorPerDay: -1,
       studySets: -1,
       priority: true,
+      claudeAccess: false,
+    },
+  },
+  code: {
+    id: 'code',
+    name: 'Code',
+    description: 'Claude Opus for developers & coding',
+    price: 24.99,
+    priceId: process.env.STRIPE_CODE_MONTHLY_PRICE_ID,
+    annualPrice: 199.99, // $16.67/month
+    annualPriceId: process.env.STRIPE_CODE_ANNUAL_PRICE_ID,
+    features: [
+      'All Pro features',
+      'Claude Opus AI (best for coding)',
+      'Advanced code generation',
+      'Code review & debugging',
+      'Multi-file project support',
+      'GitHub integration',
+      'Terminal access',
+      'Unlimited code completions',
+      'Priority API access',
+    ],
+    limits: {
+      imagesPerDay: 100,
+      videosPerDay: 20,
+      humanizerPerDay: -1,
+      humanizerMaxWords: -1,
+      detectorPerDay: -1,
+      studySets: -1,
+      priority: true,
+      claudeAccess: true,
     },
   },
   team: {
     id: 'team',
-    name: 'Classroom',
-    description: 'For teachers and study groups (5+ users)',
+    name: 'Team',
+    description: 'For teams and study groups (5+ users)',
     price: 12.99, // per user
     priceId: process.env.STRIPE_TEAM_MONTHLY_PRICE_ID,
     annualPrice: 99.99, // per user/year
@@ -105,7 +138,7 @@ export const PRICING_PLANS = {
       'Admin dashboard',
       'Usage analytics',
       'Shared study sets',
-      'Class management',
+      'Team management',
       'Priority support',
       'API access',
       'Bulk user management',
@@ -119,6 +152,7 @@ export const PRICING_PLANS = {
       studySets: -1,
       priority: true,
       teamMembers: -1,
+      claudeAccess: false,
     },
   },
 }
@@ -132,7 +166,7 @@ export function getPlan(planId: string): Plan {
 
 export function canUseFeature(
   userPlan: string,
-  feature: 'images' | 'videos' | 'humanizer' | 'detector' | 'studySets' | 'priority',
+  feature: 'images' | 'videos' | 'humanizer' | 'detector' | 'studySets' | 'priority' | 'claude',
   currentUsage: number = 0
 ): boolean {
   const plan = getPlan(userPlan)
@@ -150,6 +184,8 @@ export function canUseFeature(
       return plan.limits.studySets === -1 || currentUsage < plan.limits.studySets
     case 'priority':
       return plan.limits.priority
+    case 'claude':
+      return 'claudeAccess' in plan.limits && plan.limits.claudeAccess === true
     default:
       return true
   }

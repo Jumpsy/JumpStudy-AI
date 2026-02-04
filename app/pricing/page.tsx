@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Navbar from '@/components/Navbar'
-import { Check, Sparkles, Zap, GraduationCap, Users, Loader2 } from 'lucide-react'
+import { Check, Sparkles, Zap, GraduationCap, Users, Loader2, Code } from 'lucide-react'
 import { PRICING_PLANS, getAnnualSavings } from '@/lib/pricing'
 import { createClient } from '@/lib/supabase/client'
 
@@ -70,10 +70,11 @@ export default function PricingPage() {
     free: Sparkles,
     pro: Zap,
     student: GraduationCap,
+    code: Code,
     team: Users,
   }
 
-  const planOrder = ['free', 'pro', 'student', 'team']
+  const planOrder = ['free', 'pro', 'student', 'code', 'team']
 
   return (
     <div className="min-h-screen bg-gray-950">
